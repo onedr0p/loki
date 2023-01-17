@@ -3,7 +3,23 @@ on:
   pull_request:
   workflow_dispatch:
 jobs:
+  include-regexp:
+    runs-on: "ubuntu-latest"
+    container:
+      image: "debian:latest"
+    steps:
+      - name: "Checkout code"
+        uses: "actions/checkout@v3"
+      - name: "Determine regexp for modified files"
+        run: |
+          printf '^docs/sources/(%s)$' "$(git --no-pager diff --name-only --diff-filter=ACMRT ${{github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- docs/sources | sed 's/^docs\/sources\///' | awk -F'\n' '{if(NR == 1) {printf $0} else {printf "|"$0}}'))" > include-regexp
+      - name: "Upload include-regexp"
+        uses: "actions/upload-artifact@v3"
+        with:
+          name: "include-regexp"
+          path: "include-regexp"
   doc-validator:
+    needs: "include-regexp"
     runs-on: "ubuntu-latest"
     container:
       image: "grafana/doc-validator:v1.7.0"
@@ -13,6 +29,13 @@ jobs:
         # the doc-validator image does not contain the expected shared
         # libraries for the NodeJS packages injected by later versions.
         uses: "actions/checkout@v1"
+      - name: "Download include-regexp"
+        uses: "actions/download-artifact@v3"
+        with:
+          name: "include-regexp"
       - name: "Run doc-validator tool"
-        run: "doc-validator"
-        # run: "doc-validator --include="$(printf '^docs/sources/(%s)$' $(git --no-pager diff --name-only --diff-filter=ACMRT ${{github.event.pull_request.base.sha}} ${{ github.event.pull_request.head.sha }} -- docs/sources) | sed 's/^docs\/sources\///' | awk -F'\n' '{if(NR == 1) {printf $0} else {printf "|"$0}}')" ./docs/sources /docs/loki/latest" 
+        run: >
+          doc-validator
+          --include="$(cat include-regexp)"
+          ./docs/sources
+          /docs/loki/latest
